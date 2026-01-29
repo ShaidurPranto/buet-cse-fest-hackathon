@@ -24,16 +24,17 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
             return { success: false, message: 'Product not found' };
         }
 
-        const currentQuantity = checkResult.rows[0].quantity;
+        const currentQuantity = parseInt(checkResult.rows[0].quantity, 10);
+        const deduuctQty = parseInt(quantity, 10);
 
-        if (currentQuantity < quantity) {
+        if (currentQuantity < deduuctQty) {
             await client.query('ROLLBACK');
             return { success: false, message: 'Insufficient stock' };
         }
 
         // updating inventory
-        const updateQuery = 'UPDATE inventory SET quantity = quantity - $1 WHERE product_id = $2';
-        await client.query(updateQuery, [quantity, productId]);
+        const updateQuery = 'UPDATE inventory SET quantity = quantity - $1 WHERE product_id = $2 RETURNING quantity';
+        const updateResult = await client.query(updateQuery, [deduuctQty, productId]);
 
         // Record processed order for idempotency
         if (idempotencyKey) {
@@ -41,6 +42,7 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
         }
 
         await client.query('COMMIT');
+        console.log(`Inventory updated for Product ${productId}. New Qty: ${updateResult.rows[0].quantity}`);
         return { success: true, message: 'Inventory updated' };
 
     } catch (error) {
