@@ -1,22 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { Layers, RefreshCw } from 'lucide-react';
+import { fetchInventory } from '../services/api';
 
 const InventoryDashboard = () => {
-    // Simulating initial inventory state matching seeds
-    const [inventory, setInventory] = useState([
-        { id: 1, name: 'Gaming Console', stock: 100, status: 'In Stock' },
-        { id: 2, name: 'Wireless Controller', stock: 50, status: 'In Stock' },
-        { id: 3, name: 'Game Disc', stock: 200, status: 'In Stock' },
-        { id: 4, name: 'Headset', stock: 75, status: 'Low Stock' },
-        { id: 5, name: 'VR Set', stock: 0, status: 'Out of Stock' },
-    ]);
+    const [inventory, setInventory] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    const loadInventory = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await fetchInventory();
+            setInventory(data);
+        } catch (err) {
+            setError('Failed to load inventory');
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        loadInventory();
+    }, []);
 
     const refreshInventory = async () => {
-        setLoading(true);
-        // Simulate API fetch
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setLoading(false);
+        await loadInventory();
+    };
+
+    const getStatus = (quantity) => {
+        if (quantity === 0) return 'Out of Stock';
+        if (quantity < 20) return 'Low Stock';
+        return 'In Stock';
     };
 
     return (
@@ -27,29 +43,36 @@ const InventoryDashboard = () => {
                     <RefreshCw size={18} className={loading ? 'spin' : ''} />
                 </button>
             </div>
-            <table className="data-table">
-                <thead>
-                    <tr>
-                        <th>Product ID</th>
-                        <th>Name</th>
-                        <th>Stock Level</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {inventory.map(item => (
-                        <tr key={item.id}>
-                            <td>{item.id}</td>
-                            <td>{item.name}</td>
-                            <td className={item.stock < 10 ? 'text-danger' : ''}>{item.stock}</td>
-                            <td>
-                                <span className={`status-dot ${item.stock === 0 ? 'red' : item.stock < 20 ? 'yellow' : 'green'}`}></span>
-                                {item.status}
-                            </td>
+            {error && <div className="error-message">{error}</div>}
+            {loading && inventory.length === 0 ? (
+                <div className="loading">Loading inventory...</div>
+            ) : (
+                <table className="data-table">
+                    <thead>
+                        <tr>
+                            <th>Product ID</th>
+                            <th>Quantity</th>
+                            <th>Status</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {inventory.length > 0 ? inventory.map(item => (
+                            <tr key={item.product_id}>
+                                <td>{item.product_id}</td>
+                                <td className={item.quantity < 20 ? 'text-danger' : ''}>{item.quantity}</td>
+                                <td>
+                                    <span className={`status-dot ${item.quantity === 0 ? 'red' : item.quantity < 20 ? 'yellow' : 'green'}`}></span>
+                                    {getStatus(item.quantity)}
+                                </td>
+                            </tr>
+                        )) : (
+                            <tr>
+                                <td colSpan="3" className="text-center">No inventory items available</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            )}
         </div>
     );
 };

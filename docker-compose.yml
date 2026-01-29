@@ -16,9 +16,9 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
       interval: 5s
-      timeout: 5s   
+      timeout: 5s
       retries: 12
 
   order-service:
@@ -55,8 +55,8 @@ services:
 volumes:
   rabbitmq_data:
 
+
 networks:
   app-network:
     name: hackathon-net
-    # driver: bridge
-    external: true  
+    driver: bridge
