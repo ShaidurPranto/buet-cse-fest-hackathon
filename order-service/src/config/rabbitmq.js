@@ -1,56 +1,78 @@
 import amqp from 'amqplib';
+import { randomUUID } from 'crypto';
 
-let channel = null;
-let connection = null;
+let connection;
+let channel;
+let replyQueue;
+const REQUEST_QUEUE = 'inventory.requests';
 
-const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://appuser:apppass@rabbitmq:5672';
-const EXCHANGE_NAME = 'order_exchange';
+// ID -> { resolve, reject, timeout }
+const pendingRequests = new Map();
 
 export const connectRabbitMQ = async () => {
     try {
-        console.log(`Connecting to RabbitMQ at ${RABBITMQ_URL}...`);
-        connection = await amqp.connect(RABBITMQ_URL);
+        const amqpUrl = process.env.RABBITMQ_URL || 'amqp://appuser:apppass@rabbitmq:5672';
+        connection = await amqp.connect(amqpUrl);
         channel = await connection.createChannel();
-        
-        await channel.assertExchange(EXCHANGE_NAME, 'direct', { durable: true });
-        console.log(`Connected to RabbitMQ`);
-        console.log(`Exchange '${EXCHANGE_NAME}' asserted`);
-        
-        // handling connection close/error to reconnect?
-        connection.on('close', () => {
-            console.error('RabbitMQ connection closed, retrying...');
-            setTimeout(connectRabbitMQ, 5000);
-        });
 
+        // Assert request queue to make sure it exists
+        await channel.assertQueue(REQUEST_QUEUE, { durable: true });
+
+        // Assert anonymous exclusive reply queue
+        const q = await channel.assertQueue('', { exclusive: true });
+        replyQueue = q.queue;
+        console.log(`Connected to RabbitMQ. Reply Queue: ${replyQueue}`);
+
+        // Consumer for replies
+        channel.consume(replyQueue, (msg) => {
+            if (!msg) return;
+            const correlationId = msg.properties.correlationId;
+            const request = pendingRequests.get(correlationId);
+
+            if (request) {
+                const response = JSON.parse(msg.content.toString());
+                request.resolve(response);
+                clearTimeout(request.timeout);
+                pendingRequests.delete(correlationId);
+            } else {
+                console.warn(`Received response for unknown correlationId: ${correlationId}`);
+            }
+        }, { noAck: true });
+
+        return channel;
     } catch (error) {
-        console.error("RabbitMQ Connection Error:", error);
-        console.log("Retrying RabbitMQ connection in 5 seconds...");
-        setTimeout(connectRabbitMQ, 5000);
+        console.error("Failed to connect to RabbitMQ in Order Service:", error);
     }
 };
 
-export const getChannel = () => channel;
-
-export const publishOrder = async (order) => {
-    if (!channel) {
-        console.error("RabbitMQ channel not available. Message not sent.");
-        throw new Error("RabbitMQ channel not available");
-    }
-
-    const routingKey = 'order.created';
-    const message = JSON.stringify(order);
-    
-    try {
-        const result = channel.publish(EXCHANGE_NAME, routingKey, Buffer.from(message), {
-            persistent: true
-        });
-        
-        if (result) {
-            console.log(`[x] Sent order ${order.id} to '${EXCHANGE_NAME}' with key '${routingKey}'`);
-        } else {
-            console.error('Buffer full, message could not be sent immediately');
+export const sendInventoryRequest = (payload) => {
+    return new Promise((resolve, reject) => {
+        if (!channel || !replyQueue) {
+            return reject(new Error("RabbitMQ channel not ready"));
         }
-    } catch (err) {
-        console.error("Error publishing message:", err);
-    }
+
+        const correlationId = randomUUID();
+        const timeoutMs = 5000; // 2s timeout (reduced to handle Gremlin Latency/Vanishing Response)
+
+        const timeout = setTimeout(() => {
+            if (pendingRequests.has(correlationId)) {
+                pendingRequests.delete(correlationId);
+                reject(new Error("Inventory Service request timed out"));
+            }
+        }, timeoutMs);
+
+        pendingRequests.set(correlationId, { resolve, reject, timeout });
+
+        // Send request
+        channel.sendToQueue(
+            REQUEST_QUEUE,
+            Buffer.from(JSON.stringify(payload)),
+            { 
+                correlationId: correlationId, 
+                replyTo: replyQueue 
+            }
+        );
+        
+        console.log(`[RabbitMQ] Sent request ${correlationId} to ${REQUEST_QUEUE}`);
+    });
 };

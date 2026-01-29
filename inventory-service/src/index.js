@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import app from './app.js';
 import { bootstrapDatabase } from './database/bootstrap.js';
-import { connectRabbitMQ } from './config/rabbitmq.js';
+import { connectRabbitMQ, startInventoryConsumer } from './config/rabbitmq.js';
+import { processInventoryRequest } from './controllers/inventoryController.js';
 
 const PORT = process.env.PORT || 3000;
 
@@ -18,7 +19,8 @@ process.on('unhandledRejection', (reason, promise) => {
     console.log('Starting Inventory Service...');
 
     await bootstrapDatabase();
-    // await connectRabbitMQ();
+    await connectRabbitMQ();
+    startInventoryConsumer(processInventoryRequest);
 
     app.listen(PORT, () => {
       console.log(`Inventory Service running on port ${PORT}`);

@@ -26,17 +26,17 @@ export const fetchOrders = async () => {
     }
 };
 
-export const createOrder = async (product_id, quantity, user_id) => {
+export const createOrder = async (product_id, quantity, user_id, idempotencyKey = null) => {
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+        
         const res = await fetch(`${ORDER_API_URL}/orders`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers,
             body: JSON.stringify({ product_id, quantity, user_id }),
         });
-        if (!res.ok) throw new Error('Failed to create order');
-        return res.json();
+        return { status: res.status, data: await res.json() };
     } catch (error) {
         console.error('Error creating order:', error);
         throw error;
@@ -67,6 +67,31 @@ export const updateInventory = async (product_id, quantity) => {
         return res.json();
     } catch (error) {
         console.error('Error updating inventory:', error);
+        throw error;
+    }
+};
+
+export const fetchMetrics = async () => {
+    try {
+        const res = await fetch(`${ORDER_API_URL}/metrics`);
+        if (!res.ok) throw new Error('Failed to fetch metrics');
+        return res.json();
+    } catch (error) {
+        console.error('Error fetching metrics:', error);
+        throw error;
+    }
+};
+
+export const restockInventory = async (product_id, quantity) => {
+    try {
+        const res = await fetch(`${INVENTORY_API_URL}/inventory/restock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id, quantity }),
+        });
+        return { status: res.status, data: await res.json() };
+    } catch (error) {
+        console.error('Error restocking:', error);
         throw error;
     }
 };

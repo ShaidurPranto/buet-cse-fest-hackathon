@@ -5,7 +5,7 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
     try {
         await client.query('BEGIN');
         
-        // Idempotency check: if already processed, return success immediately
+        // Idempotency check, if already processed, return success immediately
         if (idempotencyKey) {
             const idemResult = await client.query('SELECT * FROM processed_orders WHERE order_id = $1', [idempotencyKey]);
             if (idemResult.rows.length > 0) {
@@ -24,16 +24,17 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
             return { success: false, message: 'Product not found' };
         }
 
-        const currentQuantity = checkResult.rows[0].quantity;
+        const currentQuantity = parseInt(checkResult.rows[0].quantity, 10);
+        const deduuctQty = parseInt(quantity, 10);
 
-        if (currentQuantity < quantity) {
+        if (currentQuantity < deduuctQty) {
             await client.query('ROLLBACK');
             return { success: false, message: 'Insufficient stock' };
         }
 
         // updating inventory
-        const updateQuery = 'UPDATE inventory SET quantity = quantity - $1 WHERE product_id = $2';
-        await client.query(updateQuery, [quantity, productId]);
+        const updateQuery = 'UPDATE inventory SET quantity = quantity - $1 WHERE product_id = $2 RETURNING quantity';
+        const updateResult = await client.query(updateQuery, [deduuctQty, productId]);
 
         // Record processed order for idempotency
         if (idempotencyKey) {
@@ -41,6 +42,7 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
         }
 
         await client.query('COMMIT');
+        console.log(`Inventory updated for Product ${productId}. New Qty: ${updateResult.rows[0].quantity}`);
         return { success: true, message: 'Inventory updated' };
 
     } catch (error) {
@@ -54,9 +56,9 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
 
 let requestCount = 0;
 
-export const updateInventoryHandler = async (req, res) => {
+export const processInventoryRequest = async ({ product_id, quantity, idempotencyKey }) => {
     requestCount++;
-    console.log(`Handling inventory update request #${requestCount}`);
+    console.log(`[Core Logic] Processing inventory update #${requestCount}`);
 
     // simulating gremlin Latency, delay processing for every 5th request
     if (requestCount % 5 === 0) {
@@ -64,6 +66,18 @@ export const updateInventoryHandler = async (req, res) => {
         await new Promise(resolve => setTimeout(resolve, 10000));
     }
 
+    const result = await updateInventory(product_id, quantity, idempotencyKey);
+
+    // DB updated, but client gets error due to process crash simulation
+    if (result.success && requestCount % 7 === 0) {
+        console.log("Simulating crash after db commit (process exit)");
+        process.exit(1); 
+    }
+
+    return result;
+};
+
+export const updateInventoryHandler = async (req, res) => {
     const { product_id, quantity } = req.body;
     const idempotencyKey = req.headers['idempotency-key'];
     
@@ -71,13 +85,7 @@ export const updateInventoryHandler = async (req, res) => {
         return res.status(400).json({ error: "Missing product_id or quantity" });
     }
 
-    const result = await updateInventory(product_id, quantity, idempotencyKey);
-    
-    // DB updated, but client gets error due to process crash simulation
-    if (result.success && requestCount % 7 === 0) {
-        console.log("Simulating crash after db commit (process exit)");
-        process.exit(1); 
-    }
+    const result = await processInventoryRequest({ product_id, quantity, idempotencyKey });
 
     if (result.success) {
         return res.json(result);
@@ -91,7 +99,7 @@ export const updateInventoryHandler = async (req, res) => {
     }
 };
 
-// Add stock safely
+// add stock safely
 export const addStock = async (req, res) => {
     const { product_id, quantity } = req.body;
     

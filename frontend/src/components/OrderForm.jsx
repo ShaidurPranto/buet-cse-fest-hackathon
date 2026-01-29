@@ -12,11 +12,21 @@ const OrderForm = () => {
     const [showModal, setShowModal] = useState(false);
     const [modalData, setModalData] = useState(null);
     const [isError, setIsError] = useState(false);
+    const [currentIdempotencyKey, setCurrentIdempotencyKey] = useState(null);
 
     // Load products on component mount
     useEffect(() => {
         loadProducts();
     }, []);
+
+    // Generate idempotency key only when order intent changes (new selection)
+    useEffect(() => {
+        if (selectedProduct && quantity && userId) {
+            const newKey = `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            setCurrentIdempotencyKey(newKey);
+            // console.log("New Idempotency Key generated:", newKey);
+        }
+    }, [selectedProduct, quantity, userId]);
 
     const loadProducts = async () => {
         setLoadingProducts(true);
@@ -48,30 +58,45 @@ const OrderForm = () => {
         setShowModal(false);
 
         try {
-            const response = await createOrder(selectedProduct, parseInt(quantity, 10), parseInt(userId, 10));
+            // Use existing key. If it fails and user retries without changing inputs, 
+            // the key remains same, preventing ghost PENDING orders via idempotency.
+            const response = await createOrder(selectedProduct, parseInt(quantity, 10), parseInt(userId, 10), currentIdempotencyKey);
 
-            // Show success modal
-            setModalData({
-                title: '✓ Order Confirmed',
-                type: 'success',
-                details: {
-                    'Order ID': `#${response.order.id}`,
-                    'Product ID': response.order.product_id,
-                    'Quantity': response.order.quantity,
-                    'User ID': response.order.user_id,
-                    'Status': response.order.order_status || 'PENDING'
-                },
-                message: 'Your order has been placed successfully!'
-            });
-            setIsError(false);
+            if (response.status >= 200 && response.status < 300) {
+                setModalData({
+                    title: '✓ Order Confirmed',
+                    type: 'success',
+                    details: {
+                        'Order ID': `#${response.data.order?.id}`,
+                        'Product ID': response.data.order?.product_id,
+                        'Quantity': response.data.order?.quantity,
+                        'User ID': response.data.order?.user_id,
+                        'Status': response.data.order?.order_status || 'PENDING',
+                        'Inventory': response.data.inventory_status || 'N/A'
+                    },
+                    message: response.data.message || 'Your order has been placed successfully!'
+                });
+                setIsError(false);
+                // On success, we reset form which triggers new key via useEffect
+                setQuantity(1);
+            } else {
+                setModalData({
+                    title: '✗ Order Failed',
+                    type: 'error',
+                    details: {
+                        'Product ID': selectedProduct,
+                        'Quantity': quantity,
+                        'User ID': userId,
+                        'Status Code': response.status
+                    },
+                    message: response.data.error || 'Failed to place order.'
+                });
+                setIsError(true);
+                // Do NOT reset form or key on failure, allowing retry
+            }
             setShowModal(true);
 
-            // Reset form
-            setQuantity(1);
-            setSelectedProduct(products[0]?.id || null);
-
         } catch (error) {
-            // Show error modal
             setModalData({
                 title: '✗ Order Failed',
                 type: 'error',
