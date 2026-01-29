@@ -11,6 +11,16 @@ export const getOrders = async (req, res) => {
     }
 };
 
+export const getProducts = async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM product');
+        res.json(result.rows);
+    } catch (error) {
+        console.error("Error fetching products:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
 export const createOrder = async (req, res) => {
     const { product_id, quantity, user_id } = req.body;
 

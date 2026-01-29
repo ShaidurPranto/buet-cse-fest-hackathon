@@ -1,5 +1,9 @@
 @base_url=http://localhost:3000
 
+### Get products
+GET {{base_url}}/api/products
+Accept: application/json
+
 ### Get orders
 GET {{base_url}}/api/orders
 Accept: application/json

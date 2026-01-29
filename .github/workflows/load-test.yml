@@ -1,0 +1,40 @@
+name: System Load Test
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start services
+        run: |
+          docker compose up -d --build
+          echo "Waiting for services to be ready..."
+          sleep 20 # Give enough time for postgres and services to start
+
+      - name: Install k6
+        run: |
+          curl https://github.com/grafana/k6/releases/download/v0.47.0/k6-v0.47.0-linux-amd64.tar.gz -L | tar xvz --strip-components 1
+          sudo cp k6 /usr/local/bin/
+
+      - name: Run k6 Load Test
+        run: |
+          k6 run load_test.js
+        env:
+          ORDER_URL: http://localhost:3000/api/orders
+
+      - name: Stop services
+        if: always()
+        run: docker compose down
