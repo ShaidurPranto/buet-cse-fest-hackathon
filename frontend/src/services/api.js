@@ -2,7 +2,19 @@
 export const INVENTORY_API_URL = 'http://localhost:3001/api';
 export const ORDER_API_URL = 'http://localhost:3000/api';
 
-// Inventory API
+// Product API
+export const fetchProducts = async () => {
+    try {
+        const res = await fetch(`${ORDER_API_URL}/products`);
+        if (!res.ok) throw new Error('Failed to fetch products');
+        return res.json();
+    } catch (error) {
+        console.error('Error fetching products:', error);
+        throw error;
+    }
+};
+
+// Order API
 export const fetchOrders = async () => {
     try {
         const res = await fetch(`${ORDER_API_URL}/orders`);
