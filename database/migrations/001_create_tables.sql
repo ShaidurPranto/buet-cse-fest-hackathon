@@ -9,7 +9,8 @@ CREATE TABLE "order" (
     id SERIAL PRIMARY KEY,
     product_id INTEGER REFERENCES product(id),
     quantity INTEGER NOT NULL,
-    user_id INTEGER NOT NULL
+    user_id INTEGER NOT NULL,
+    order_status VARCHAR(50)   -- PENDING, DONE, FAILED
 );
 
 -- creating Inventory table
