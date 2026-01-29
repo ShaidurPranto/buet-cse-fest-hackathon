@@ -13,10 +13,10 @@ async function waitForDatabase() {
   for (let i = 0; i < MAX_RETRIES; i++) {
     try {
       await pool.query('SELECT 1');
-      console.log('✅ Database connected');
+      console.log('Database connected');
       return;
     } catch (err) {
-      console.log(`⏳ Database not ready, retrying... (${MAX_RETRIES - i} attempts left)`);
+      console.log(`Database not ready, retrying... (${MAX_RETRIES - i} attempts left)`);
       if (err.code) console.log(`   Error: ${err.code} - ${err.message}`);
       await new Promise(res => setTimeout(res, RETRY_DELAY));
     }
@@ -44,22 +44,22 @@ async function runSqlFile(filePath) {
 }
 
 async function createDatabase() {
-  const filePath = path.join(__dirname, '../../../database/migrations/001_create_tables.sql');
+  const filePath = path.join(__dirname, '../../database/migrations/001_create_tables.sql');
   console.log('Creating database tables...');
   await runSqlFile(filePath);
 }
 
 async function populateDatabase() {
-  const filePath = path.join(__dirname, '../../../database/seeds/seed_data.sql');
+  const filePath = path.join(__dirname, '../../database/seeds/seed_data.sql');
   console.log('Populating database with initial data...');
   await runSqlFile(filePath);
 }
 
 async function bootstrapDatabase() {
-  console.log('🔄 Initializing database...');
+  console.log('Initializing database...');
   await waitForDatabase();
 
-  const exists = await tableExists('trains');
+  const exists = await tableExists('inventory');
 
   if (exists) {
     console.log('Database already initialized. Skipping bootstrap.');

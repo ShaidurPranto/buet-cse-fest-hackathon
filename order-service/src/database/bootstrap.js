@@ -59,7 +59,7 @@ async function bootstrapDatabase() {
   console.log('Initializing database...');
   await waitForDatabase();
 
-  const exists = await tableExists('trains');
+  const exists = await tableExists('order');
 
   if (exists) {
     console.log('Database already initialized. Skipping bootstrap.');
