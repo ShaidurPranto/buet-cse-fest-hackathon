@@ -26,11 +26,26 @@ services:
     container_name: order-service
     ports:
       - "3000:3000"
-    # environment:
-    #   - PORT=3000
-    #   - RABBITMQ_URL=amqp://appuser:apppass@rabbitmq:5672/
+    environment:
+      - PORT=3000
+      - RABBITMQ_URL=amqp://appuser:apppass@rabbitmq:5672/
+    # env_file:
+    #   - ./order-service/.env
+    networks:
+      - app-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  inventory-service:
+    build: ./inventory-service
+    container_name: inventory-service
+    ports:
+      - "3001:3001"
+    environment:
+      - RABBITMQ_URL=amqp://appuser:apppass@rabbitmq:5672
     env_file:
-      - ./order-service/.env
+      - ./inventory-service/.env
     networks:
       - app-network
     depends_on:
