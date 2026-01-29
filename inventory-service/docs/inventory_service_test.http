@@ -1,0 +1,14 @@
+@base_url=http://localhost:3001
+
+### Get inventory
+GET {{base_url}}/api/inventory
+Accept: application/json
+
+### Update inventory
+POST {{base_url}}/api/inventory
+Content-Type: application/json
+
+{
+    "product_id": 1,
+    "quantity": 2
+}
