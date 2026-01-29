@@ -3,4 +3,4 @@ INSERT INTO inventory (product_id, quantity) VALUES
 (2, 50),
 (3, 200),
 (4, 75),
-(5, 150);
+(5, 10000);
