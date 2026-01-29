@@ -21,7 +21,9 @@ Once the service is running, you can access the RabbitMQ Management Interface at
 
 http://localhost:15672
 
-- **Username:** guest
-- **Password:** guest
+<!-- - **Username:** guest
+- **Password:** guest -->
+- **Username:** appuser
+- **Password:** appuser
 
 The AMQP port is `5672`.
