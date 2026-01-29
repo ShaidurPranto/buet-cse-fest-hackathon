@@ -1,5 +1,5 @@
 # =========================
-# Namespace
+# 1. Namespace
 # =========================
 apiVersion: v1
 kind: Namespace
@@ -7,8 +7,21 @@ metadata:
   name: microservices
 ---
 # =========================
-# RabbitMQ Config
+# 2. Secrets & Config
 # =========================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: microservices
+type: Opaque
+stringData:
+  RABBITMQ_DEFAULT_USER: appuser
+  RABBITMQ_DEFAULT_PASS: apppass
+  # These keys are referenced by the deployments below
+  ORDER_DB_URL: "postgresql://neondb_owner:npg_REMfKV1qSx9A@ep-cold-sunset-a19jpchw-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  INVENTORY_DB_URL: "postgresql://neondb_owner:npg_7Sp0kHzsOgXM@ep-dawn-smoke-a104fu0e-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,18 +31,15 @@ data:
   rabbitmq.conf: |
     load_definitions = /etc/rabbitmq/definitions.json
   definitions.json: |
-    {}
+    {
+      "vhosts": [{ "name": "/" }],
+      "users": [{ "name": "appuser", "password": "apppass", "tags": "administrator" }],
+      "permissions": [{ "user": "appuser", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }]
+    }
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: rabbitmq-secret
-  namespace: microservices
-type: Opaque
-stringData:
-  RABBITMQ_DEFAULT_USER: appuser
-  RABBITMQ_DEFAULT_PASS: apppass
----
+# =========================
+# 3. RabbitMQ (Stateful Setup)
+# =========================
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -63,19 +73,22 @@ spec:
           ports:
             - containerPort: 5672
             - containerPort: 15672
-          envFrom:
-            - secretRef:
-                name: rabbitmq-secret
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: RABBITMQ_DEFAULT_PASS
           volumeMounts:
             - name: rabbitmq-data
               mountPath: /var/lib/rabbitmq
             - name: rabbitmq-config
               mountPath: /etc/rabbitmq
-          readinessProbe:
-            exec:
-              command: ["rabbitmq-diagnostics", "-q", "ping"]
-            initialDelaySeconds: 10
-            periodSeconds: 5
       volumes:
         - name: rabbitmq-data
           persistentVolumeClaim:
@@ -97,26 +110,18 @@ spec:
       port: 5672
     - name: management
       port: 15672
+  type: ClusterIP
 ---
 # =========================
-# Order Service
+# 4. Order Service
 # =========================
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: order-service-config
-  namespace: microservices
-data:
-  PORT: "3000"
-  RABBITMQ_URL: amqp://appuser:apppass@rabbitmq:5672/
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: order-service
   namespace: microservices
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: order-service
@@ -127,18 +132,19 @@ spec:
     spec:
       containers:
         - name: order-service
-          image: YOUR_DOCKERHUB/order-service:1.0
+          image: shaidurpranto/order-service:tagname
           ports:
             - containerPort: 3000
-          envFrom:
-            - configMapRef:
-                name: order-service-config
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 3000
-            initialDelaySeconds: 10
-            periodSeconds: 5
+          env:
+            - name: PORT
+              value: "3000"
+            - name: RABBITMQ_URL
+              value: "amqp://appuser:apppass@rabbitmq:5672"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: ORDER_DB_URL
 ---
 apiVersion: v1
 kind: Service
@@ -151,25 +157,19 @@ spec:
   ports:
     - port: 3000
       targetPort: 3000
+      nodePort: 30080 
+  type: NodePort
 ---
 # =========================
-# Inventory Service
+# 5. Inventory Service
 # =========================
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: inventory-service-config
-  namespace: microservices
-data:
-  PORT: "3001"
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inventory-service
   namespace: microservices
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: inventory-service
@@ -180,12 +180,19 @@ spec:
     spec:
       containers:
         - name: inventory-service
-          image: YOUR_DOCKERHUB/inventory-service:1.0
+          image: shaidurpranto/inventory-service:tagname
           ports:
             - containerPort: 3001
-          envFrom:
-            - configMapRef:
-                name: inventory-service-config
+          env:
+            - name: PORT
+              value: "3001"
+            - name: RABBITMQ_URL
+              value: "amqp://appuser:apppass@rabbitmq:5672"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: INVENTORY_DB_URL
 ---
 apiVersion: v1
 kind: Service
@@ -198,3 +205,5 @@ spec:
   ports:
     - port: 3001
       targetPort: 3001
+      nodePort: 30081 
+  type: NodePort
