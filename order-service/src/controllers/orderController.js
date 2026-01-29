@@ -26,6 +26,7 @@ export const getProducts = async (req, res) => {
 export const createOrder = async (req, res) => {
     orderRequestCount++;
     const { product_id, quantity, user_id } = req.body;
+    const idempotencyKey = req.headers['idempotency-key'];
 
     // basic validation
     if (!product_id || !quantity || !user_id) {
@@ -35,20 +36,53 @@ export const createOrder = async (req, res) => {
     const client = await pool.connect();
 
     try {
-        await client.query('BEGIN');
+        let newOrder;
 
-        // foreign key constraint will handle non-existent product_id
-        const insertQuery = `
-            INSERT INTO "order" (product_id, quantity, user_id, order_status)
-            VALUES ($1, $2, $3, 'PENDING')
-            RETURNING id, product_id, quantity, user_id, order_status
-        `;
-        const result = await client.query(insertQuery, [product_id, quantity, user_id]);
-        const newOrder = result.rows[0];
+        // Check for existing order by Idempotency Key
+        if (idempotencyKey) {
+            const existingResult = await pool.query('SELECT * FROM "order" WHERE idempotency_key = $1', [idempotencyKey]);
+            if (existingResult.rows.length > 0) {
+                newOrder = existingResult.rows[0];
+                console.log(`Idempotency hit: Order ${newOrder.id} found for key ${idempotencyKey}`);
 
-        await client.query('COMMIT');
-        
-        console.log(`Order ${newOrder.id} created successfully.`);
+                if (newOrder.order_status === 'DONE') {
+                     return res.status(200).json({ 
+                        order: newOrder, 
+                        inventory_status: 'SUCCESS',
+                        message: "Order already processed (Idempotent)" 
+                    });
+                }
+                // If PENDING, we fall through to retry the inventory step
+            }
+        }
+
+        if (!newOrder) {
+            await client.query('BEGIN');
+
+            // foreign key constraint will handle non-existent product_id
+            const insertQuery = `
+                INSERT INTO "order" (product_id, quantity, user_id, order_status, idempotency_key)
+                VALUES ($1, $2, $3, 'PENDING', $4)
+                RETURNING id, product_id, quantity, user_id, order_status
+            `;
+            try {
+                const result = await client.query(insertQuery, [product_id, quantity, user_id, idempotencyKey]);
+                newOrder = result.rows[0];
+                await client.query('COMMIT');
+                console.log(`Order ${newOrder.id} created successfully.`);
+            } catch (err) {
+                await client.query('ROLLBACK');
+                if (err.code === '23505') { // Unique violation for idempotency_key
+                    const existingResult = await pool.query('SELECT * FROM "order" WHERE idempotency_key = $1', [idempotencyKey]);
+                    newOrder = existingResult.rows[0];
+                    if (newOrder.order_status === 'DONE') {
+                        return res.status(200).json({ order: newOrder, inventory_status: 'SUCCESS', message: "Order already processed" });
+                    }
+                } else {
+                    throw err;
+                }
+            }
+        }
 
         // syncing http communication with inventory service
         let inventorySuccess = false;

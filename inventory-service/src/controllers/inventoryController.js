@@ -91,6 +91,37 @@ export const updateInventoryHandler = async (req, res) => {
     }
 };
 
+// Add stock safely
+export const addStock = async (req, res) => {
+    const { product_id, quantity } = req.body;
+    
+    if (!product_id || !quantity || quantity <= 0) {
+        return res.status(400).json({ error: "Invalid product_id or quantity (must be positive)" });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const updateQuery = 'UPDATE inventory SET quantity = quantity + $1 WHERE product_id = $2 RETURNING quantity';
+        const result = await client.query(updateQuery, [quantity, product_id]);
+
+        if (result.rowCount === 0) {
+             await client.query('ROLLBACK');
+             return res.status(404).json({ error: "Product not found" });
+        }
+
+        await client.query('COMMIT');
+        return res.json({ success: true, message: 'Stock added', new_quantity: result.rows[0].quantity });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error adding stock:", error);
+        return res.status(500).json({ error: "Internal Server Error" });
+    } finally {
+        client.release();
+    }
+};
+
 export const getInventory = async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM inventory');
