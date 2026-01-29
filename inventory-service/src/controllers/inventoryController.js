@@ -37,7 +37,18 @@ export const updateInventory = async (productId, quantity) => {
     }
 };
 
+let requestCount = 0;
+
 export const updateInventoryHandler = async (req, res) => {
+    requestCount++;
+    console.log(`Handling inventory update request #${requestCount}`);
+
+    // simulating gremlin Latency, delay processing for every 5th request
+    if (requestCount % 5 === 0) {
+        console.log(`Simulating high latency (10s) for known gremlin pattern...`);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+    }
+
     const { product_id, quantity } = req.body;
     
     if (!product_id || !quantity) {
