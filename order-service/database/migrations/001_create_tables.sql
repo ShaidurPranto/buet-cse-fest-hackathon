@@ -13,9 +13,3 @@ CREATE TABLE "order" (
     order_status VARCHAR(50)   -- PENDING, DONE, FAILED
 );
 
--- creating Inventory table
-CREATE TABLE inventory (
-    id SERIAL PRIMARY KEY,
-    product_id INTEGER REFERENCES product(id),
-    quantity INTEGER NOT NULL
-);

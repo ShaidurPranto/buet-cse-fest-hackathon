@@ -6,15 +6,14 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-    # environment:
-    #   RABBITMQ_DEFAULT_USER: guest
-    #   RABBITMQ_DEFAULT_PASS: guest
     environment:
       RABBITMQ_DEFAULT_USER: appuser
       RABBITMQ_DEFAULT_PASS: apppass
       RABBITMQ_DEFAULT_VHOST: /
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     networks:
       - app-network
     healthcheck:
@@ -28,4 +27,5 @@ volumes:
 
 networks:
   app-network:
+    name: hackathon-net
     driver: bridge
