@@ -3,6 +3,35 @@ import { sendInventoryRequest } from '../config/rabbitmq.js';
 
 let orderRequestCount = 0;
 
+// Response time tracking for rolling 30s window
+const responseTimes = [];
+const WINDOW_MS = 30000;
+
+export const addResponseTime = (duration) => {
+    const now = Date.now();
+    responseTimes.push({ time: now, duration });
+    // Clean old entries
+    while (responseTimes.length > 0 && responseTimes[0].time < now - WINDOW_MS) {
+        responseTimes.shift();
+    }
+};
+
+export const getMetrics = (req, res) => {
+    const now = Date.now();
+    const recent = responseTimes.filter(r => r.time >= now - WINDOW_MS);
+    const avgResponseTime = recent.length > 0 
+        ? recent.reduce((sum, r) => sum + r.duration, 0) / recent.length 
+        : 0;
+    const isAlert = avgResponseTime > 1000;
+    
+    res.json({
+        avgResponseTime: Math.round(avgResponseTime),
+        requestCount: recent.length,
+        isAlert,
+        windowMs: WINDOW_MS
+    });
+};
+
 export const getOrders = async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM "order"');
@@ -24,6 +53,7 @@ export const getProducts = async (req, res) => {
 };
 
 export const createOrder = async (req, res) => {
+    const startTime = Date.now();
     orderRequestCount++;
     const { product_id, quantity, user_id } = req.body;
     const idempotencyKey = req.headers['idempotency-key'];
@@ -126,9 +156,9 @@ export const createOrder = async (req, res) => {
         }
 
         if (inventorySuccess) {
-            // Update Order Status to DONE
             await pool.query('UPDATE "order" SET order_status = $1 WHERE id = $2', ['DONE', newOrder.id]);
             newOrder.order_status = 'DONE';
+            addResponseTime(Date.now() - startTime);
 
             // CHAOS: Random 500 noise after success (every 11th request)
             if (orderRequestCount % 11 === 0) {
@@ -142,6 +172,7 @@ export const createOrder = async (req, res) => {
                 message: inventoryMessage
             });
         } else {
+            addResponseTime(Date.now() - startTime);
             return res.status(503).json({
                 order: newOrder,
                 inventory_status: 'FAILED',
@@ -150,6 +181,7 @@ export const createOrder = async (req, res) => {
         }
 
     } catch (error) {
+        addResponseTime(Date.now() - startTime);
         await client.query('ROLLBACK');
         console.error("Error creating order:", error);
 

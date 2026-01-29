@@ -48,30 +48,42 @@ const OrderForm = () => {
         setShowModal(false);
 
         try {
-            const response = await createOrder(selectedProduct, parseInt(quantity, 10), parseInt(userId, 10));
+            const idempotencyKey = `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const response = await createOrder(selectedProduct, parseInt(quantity, 10), parseInt(userId, 10), idempotencyKey);
 
-            // Show success modal
-            setModalData({
-                title: '✓ Order Confirmed',
-                type: 'success',
-                details: {
-                    'Order ID': `#${response.order.id}`,
-                    'Product ID': response.order.product_id,
-                    'Quantity': response.order.quantity,
-                    'User ID': response.order.user_id,
-                    'Status': response.order.order_status || 'PENDING'
-                },
-                message: 'Your order has been placed successfully!'
-            });
-            setIsError(false);
+            if (response.status >= 200 && response.status < 300) {
+                setModalData({
+                    title: '✓ Order Confirmed',
+                    type: 'success',
+                    details: {
+                        'Order ID': `#${response.data.order?.id}`,
+                        'Product ID': response.data.order?.product_id,
+                        'Quantity': response.data.order?.quantity,
+                        'User ID': response.data.order?.user_id,
+                        'Status': response.data.order?.order_status || 'PENDING',
+                        'Inventory': response.data.inventory_status || 'N/A'
+                    },
+                    message: response.data.message || 'Your order has been placed successfully!'
+                });
+                setIsError(false);
+            } else {
+                setModalData({
+                    title: '✗ Order Failed',
+                    type: 'error',
+                    details: {
+                        'Product ID': selectedProduct,
+                        'Quantity': quantity,
+                        'User ID': userId,
+                        'Status Code': response.status
+                    },
+                    message: response.data.error || 'Failed to place order.'
+                });
+                setIsError(true);
+            }
             setShowModal(true);
-
-            // Reset form
             setQuantity(1);
-            setSelectedProduct(products[0]?.id || null);
 
         } catch (error) {
-            // Show error modal
             setModalData({
                 title: '✗ Order Failed',
                 type: 'error',

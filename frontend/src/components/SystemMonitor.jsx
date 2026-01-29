@@ -1,47 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Server, CheckCircle, XCircle, FileJson, Hash } from 'lucide-react';
+import { Activity, Server, CheckCircle, XCircle, FileJson, Hash, AlertTriangle, Clock } from 'lucide-react';
+import { fetchMetrics } from '../services/api';
 
 const SystemMonitor = () => {
     const [activeTab, setActiveTab] = useState('services');
     const [orderHealth, setOrderHealth] = useState(null);
     const [inventoryHealth, setInventoryHealth] = useState(null);
+    const [metrics, setMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(new Date());
 
     const fetchHealth = async () => {
         try {
-            // Fetch Order Service Health
             try {
                 const res = await fetch('http://localhost:3000/health');
                 const data = await res.json();
-                setOrderHealth({ 
-                    httpStatus: res.status, 
-                    isUp: res.ok, 
-                    data 
-                });
+                setOrderHealth({ httpStatus: res.status, isUp: res.ok, data });
             } catch (err) {
-                setOrderHealth({ 
-                    httpStatus: 0, 
-                    isUp: false, 
-                    data: { error: 'Service Unreachable' } 
-                });
+                setOrderHealth({ httpStatus: 0, isUp: false, data: { error: 'Service Unreachable' } });
             }
 
-            // Fetch Inventory Service Health
             try {
                 const res = await fetch('http://localhost:3001/health');
                 const data = await res.json();
-                setInventoryHealth({ 
-                    httpStatus: res.status, 
-                    isUp: res.ok, 
-                    data 
-                });
+                setInventoryHealth({ httpStatus: res.status, isUp: res.ok, data });
             } catch (err) {
-                setInventoryHealth({ 
-                    httpStatus: 0, 
-                    isUp: false, 
-                    data: { error: 'Service Unreachable' } 
-                });
+                setInventoryHealth({ httpStatus: 0, isUp: false, data: { error: 'Service Unreachable' } });
+            }
+
+            try {
+                const data = await fetchMetrics();
+                setMetrics(data);
+            } catch (err) {
+                setMetrics(null);
             }
 
             setLastUpdated(new Date());
@@ -54,15 +45,57 @@ const SystemMonitor = () => {
 
     useEffect(() => {
         fetchHealth();
-        const interval = setInterval(fetchHealth, 3000); // Poll every 3s
+        const interval = setInterval(fetchHealth, 3000);
         return () => clearInterval(interval);
     }, []);
+
+    const ResponseTimeAlert = () => {
+        if (!metrics) return null;
+        const isAlert = metrics.isAlert;
+        
+        return (
+            <div style={{
+                background: isAlert ? '#fef2f2' : '#f0fdf4',
+                border: `2px solid ${isAlert ? '#ef4444' : '#22c55e'}`,
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '16px'
+            }}>
+                <div style={{
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '50%',
+                    background: isAlert ? '#ef4444' : '#22c55e',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    animation: isAlert ? 'pulse 1s infinite' : 'none'
+                }}>
+                    {isAlert ? <AlertTriangle size={30} color="#fff" /> : <CheckCircle size={30} color="#fff" />}
+                </div>
+                <div>
+                    <h3 style={{ margin: 0, color: isAlert ? '#dc2626' : '#16a34a' }}>
+                        {isAlert ? 'PERFORMANCE ALERT' : 'SYSTEM HEALTHY'}
+                    </h3>
+                    <p style={{ margin: '4px 0 0', color: '#64748b' }}>
+                        Average Response Time (30s window): <strong>{metrics.avgResponseTime}ms</strong>
+                        {isAlert && ' — Exceeds 1000ms threshold!'}
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#94a3b8' }}>
+                        Requests in window: {metrics.requestCount}
+                    </p>
+                </div>
+            </div>
+        );
+    };
 
     const ServiceCard = ({ title, health, port }) => {
         if (!health) return <div className="card">Loading...</div>;
 
         const isUp = health.isUp;
-        // Extract dependency statuses if available
         const services = health.data?.services || {};
 
         return (
@@ -105,6 +138,8 @@ const SystemMonitor = () => {
 
     return (
         <div className="dashboard-container">
+            <ResponseTimeAlert />
+            
             <div className="header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
                     <h2>System Monitor</h2>
@@ -113,7 +148,6 @@ const SystemMonitor = () => {
                     </p>
                 </div>
                 
-                {/* Tab Switcher */}
                 <div className="tabs" style={{ display: 'flex', gap: '10px', background: '#fff', padding: '5px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                     <button 
                         onClick={() => setActiveTab('services')}
