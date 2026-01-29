@@ -18,7 +18,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.log('Starting Order Service...');
 
     await bootstrapDatabase();
-    // await connectRabbitMQ();
+    await connectRabbitMQ();
 
     app.listen(PORT, () => {
       console.log(`Order Service running on port ${PORT}`);

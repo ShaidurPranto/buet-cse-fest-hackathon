@@ -5,7 +5,7 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
     try {
         await client.query('BEGIN');
         
-        // Idempotency check: if already processed, return success immediately
+        // Idempotency check, if already processed, return success immediately
         if (idempotencyKey) {
             const idemResult = await client.query('SELECT * FROM processed_orders WHERE order_id = $1', [idempotencyKey]);
             if (idemResult.rows.length > 0) {
@@ -54,9 +54,9 @@ export const updateInventory = async (productId, quantity, idempotencyKey) => {
 
 let requestCount = 0;
 
-export const updateInventoryHandler = async (req, res) => {
+export const processInventoryRequest = async ({ product_id, quantity, idempotencyKey }) => {
     requestCount++;
-    console.log(`Handling inventory update request #${requestCount}`);
+    console.log(`[Core Logic] Processing inventory update #${requestCount}`);
 
     // simulating gremlin Latency, delay processing for every 5th request
     if (requestCount % 5 === 0) {
@@ -64,6 +64,18 @@ export const updateInventoryHandler = async (req, res) => {
         await new Promise(resolve => setTimeout(resolve, 10000));
     }
 
+    const result = await updateInventory(product_id, quantity, idempotencyKey);
+
+    // DB updated, but client gets error due to process crash simulation
+    if (result.success && requestCount % 7 === 0) {
+        console.log("Simulating crash after db commit (process exit)");
+        process.exit(1); 
+    }
+
+    return result;
+};
+
+export const updateInventoryHandler = async (req, res) => {
     const { product_id, quantity } = req.body;
     const idempotencyKey = req.headers['idempotency-key'];
     
@@ -71,13 +83,7 @@ export const updateInventoryHandler = async (req, res) => {
         return res.status(400).json({ error: "Missing product_id or quantity" });
     }
 
-    const result = await updateInventory(product_id, quantity, idempotencyKey);
-    
-    // DB updated, but client gets error due to process crash simulation
-    if (result.success && requestCount % 7 === 0) {
-        console.log("Simulating crash after db commit (process exit)");
-        process.exit(1); 
-    }
+    const result = await processInventoryRequest({ product_id, quantity, idempotencyKey });
 
     if (result.success) {
         return res.json(result);
@@ -91,7 +97,7 @@ export const updateInventoryHandler = async (req, res) => {
     }
 };
 
-// Add stock safely
+// add stock safely
 export const addStock = async (req, res) => {
     const { product_id, quantity } = req.body;
     

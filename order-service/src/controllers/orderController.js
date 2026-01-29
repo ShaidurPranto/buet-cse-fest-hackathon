@@ -1,5 +1,5 @@
 import pool from '../config/db.js';
-// import { publishOrder } from '../config/rabbitmq.js';
+import { sendInventoryRequest } from '../config/rabbitmq.js';
 
 let orderRequestCount = 0;
 
@@ -46,13 +46,12 @@ export const createOrder = async (req, res) => {
                 console.log(`Idempotency hit: Order ${newOrder.id} found for key ${idempotencyKey}`);
 
                 if (newOrder.order_status === 'DONE') {
-                     return res.status(200).json({ 
-                        order: newOrder, 
+                    return res.status(200).json({
+                        order: newOrder,
                         inventory_status: 'SUCCESS',
-                        message: "Order already processed (Idempotent)" 
+                        message: "Order already processed (Idempotent)"
                     });
                 }
-                // If PENDING, we fall through to retry the inventory step
             }
         }
 
@@ -84,51 +83,34 @@ export const createOrder = async (req, res) => {
             }
         }
 
-        // syncing http communication with inventory service
+        // syncing via rabbitmq rpc
         let inventorySuccess = false;
         let inventoryMessage = '';
         let lastError = null;
 
         for (let i = 0; i < 3; i++) {
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+                console.log(`Attempting inventory update for Order ${newOrder.id} via RabbitMQ (Attempt ${i + 1})`);
 
-                console.log(`Attempting inventory update for Order ${newOrder.id} (Attempt ${i + 1})`);
-                
-                const inventoryResponse = await fetch('http://inventory-service:3001/api/inventory', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Idempotency-Key': newOrder.id.toString()
-                    },
-                    body: JSON.stringify({
-                        product_id: newOrder.product_id,
-                        quantity: newOrder.quantity
-                    }),
-                    signal: controller.signal
+                const response = await sendInventoryRequest({
+                    product_id: newOrder.product_id,
+                    quantity: newOrder.quantity,
+                    idempotencyKey: newOrder.id.toString()
                 });
-                clearTimeout(timeoutId);
 
-                if (inventoryResponse.ok) {
-                    const inventoryData = await inventoryResponse.json();
+                if (response.success) {
                     inventorySuccess = true;
-                    inventoryMessage = inventoryData.message;
+                    inventoryMessage = response.message;
                     break;
                 } else {
-                    let errorMsg = 'Inventory Error';
-                    try {
-                        const errorData = await inventoryResponse.json();
-                        errorMsg = errorData.error || errorMsg;
-                    } catch (e) { /* ignore JSON parse error */ }
-
                     // Don't retry on client errors
-                    if ([400, 404, 409].includes(inventoryResponse.status)) {
-                        throw new Error(errorMsg || 'Inventory Client Error');
+                    if ([400, 404, 409].includes(response.status)) {
+                        throw new Error(response.message || 'Inventory Client Error');
                     }
-                    console.warn(`Inventory update failed (Attempt ${i + 1}): ${inventoryResponse.status}`);
-                    lastError = new Error(errorMsg);
+                    console.warn(`Inventory update failed (Attempt ${i + 1}): ${response.message}`);
+                    lastError = new Error(response.message);
                 }
+
             } catch (error) {
                 console.error(`Error communicating with Inventory Service (Attempt ${i + 1}):`, error.message);
                 lastError = error;
@@ -136,7 +118,7 @@ export const createOrder = async (req, res) => {
                     break;
                 }
             }
-            
+
             // Backoff before retry
             if (!inventorySuccess && i < 2) {
                 await new Promise(res => setTimeout(res, 1000));
@@ -144,25 +126,25 @@ export const createOrder = async (req, res) => {
         }
 
         if (inventorySuccess) {
-             // Update Order Status to DONE
-             await pool.query('UPDATE "order" SET order_status = $1 WHERE id = $2', ['DONE', newOrder.id]);
-             newOrder.order_status = 'DONE'; 
+            // Update Order Status to DONE
+            await pool.query('UPDATE "order" SET order_status = $1 WHERE id = $2', ['DONE', newOrder.id]);
+            newOrder.order_status = 'DONE';
 
-             // CHAOS: Random 500 noise after success (every 11th request)
-             if (orderRequestCount % 11 === 0) {
-                 console.log("CHAOS INJECTION: Order processed successfully, but returning 500 noise.");
-                 return res.status(500).json({ error: "Simulated Internal Server Error (Noise)" });
-             }
+            // CHAOS: Random 500 noise after success (every 11th request)
+            if (orderRequestCount % 11 === 0) {
+                console.log("CHAOS INJECTION: Order processed successfully, but returning 500 noise.");
+                return res.status(500).json({ error: "Simulated Internal Server Error (Noise)" });
+            }
 
-             res.status(201).json({ 
-                order: newOrder, 
+            res.status(201).json({
+                order: newOrder,
                 inventory_status: 'SUCCESS',
-                message: inventoryMessage 
+                message: inventoryMessage
             });
         } else {
-             return res.status(503).json({ 
-                order: newOrder, 
-                inventory_status: 'FAILED', 
+            return res.status(503).json({
+                order: newOrder,
+                inventory_status: 'FAILED',
                 error: lastError ? lastError.message : 'Inventory Service Unreachable'
             });
         }
@@ -170,9 +152,9 @@ export const createOrder = async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Error creating order:", error);
-        
+
         if (error.code === '23503') { // foreign key violation
-             return res.status(400).json({ error: "Invalid product_id. Product does not exist." });
+            return res.status(400).json({ error: "Invalid product_id. Product does not exist." });
         }
 
         res.status(500).json({ error: "Internal Server Error" });

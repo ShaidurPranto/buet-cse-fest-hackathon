@@ -1,71 +1,67 @@
 import amqp from 'amqplib';
-import { updateInventory } from '../controllers/inventoryController.js';
 
-let channel = null;
-let connection = null;
-
-const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://appuser:apppass@rabbitmq:5672';
-const INVENTORY_QUEUE = 'inventory_queue';
-const RESPONSE_EXCHANGE = 'inventory_exchange';
-const RESPONSE_ROUTING_KEY = 'inventory.response';
+let connection;
+let channel;
+const QUEUE_NAME = 'inventory.requests';
 
 export const connectRabbitMQ = async () => {
     try {
-        console.log(`Inventory Service connecting to RabbitMQ at ${RABBITMQ_URL}...`);
-        connection = await amqp.connect(RABBITMQ_URL);
+        const amqpUrl = process.env.RABBITMQ_URL || 'amqp://appuser:apppass@rabbitmq:5672';
+        connection = await amqp.connect(amqpUrl);
         channel = await connection.createChannel();
         
-        await channel.assertQueue(INVENTORY_QUEUE, { durable: true });
-        await channel.assertExchange(RESPONSE_EXCHANGE, 'direct', { durable: true });
-
-        console.log(`Connected to RabbitMQ`);
+        await channel.assertQueue(QUEUE_NAME, { durable: true });
+        // Prefetch 1 to ensure one-by-one processing (good for simulation)
+        await channel.prefetch(1); 
         
-        // Start Consuming
-        consumeInventoryQueue();
-
-        connection.on('close', () => {
-            console.error('RabbitMQ connection closed, retrying...');
-            setTimeout(connectRabbitMQ, 5000);
-        });
-
+        console.log(`Connected to RabbitMQ`);
+        return channel;
     } catch (error) {
-        console.error("RabbitMQ Connection Error:", error);
-        console.log("Retrying RabbitMQ connection in 5 seconds...");
-        setTimeout(connectRabbitMQ, 5000);
+        console.error("Failed to connect to RabbitMQ:", error);
     }
 };
 
-const consumeInventoryQueue = () => {
-    if (!channel) return;
+export const startInventoryConsumer = (updateInventoryLogic) => {
+    if (!channel) {
+        console.error("RabbitMQ channel not established, cannot start consumer");
+        return;
+    }
 
-    console.log(`Waiting for messages in ${INVENTORY_QUEUE}...`);
+    console.log(`Waiting for messages in ${QUEUE_NAME}...`);
     
-    channel.consume(INVENTORY_QUEUE, async (msg) => {
-        if (msg !== null) {
-            try {
-                const orderData = JSON.parse(msg.content.toString());
-                console.log("Received order:", orderData);
+    channel.consume(QUEUE_NAME, async (msg) => {
+        if (!msg) return;
 
-                const { id: orderId, product_id, quantity } = orderData;
-                
-                // Process Inventory Update
-                const result = await updateInventory(product_id, quantity);
-                
-                // Publish Response
-                const response = {
-                    order_id: orderId,
-                    status: result.success ? 'SUCCESS' : 'FAILURE',
-                    message: result.message
-                };
+        const content = JSON.parse(msg.content.toString());
+        const { product_id, quantity, idempotencyKey } = content;
+        const { replyTo, correlationId } = msg.properties;
 
-                channel.publish(RESPONSE_EXCHANGE, RESPONSE_ROUTING_KEY, Buffer.from(JSON.stringify(response)));
-                console.log("Sent response:", response);
+        console.log(`[RabbitMQ] Received inventory request:`, content);
 
-                channel.ack(msg);
-            } catch (err) {
-                console.error("Error processing message:", err);
-                channel.nack(msg, false, false); // or recurse/dlq depending on strategy
+        try {
+             // Pass logic to process the request
+             const result = await updateInventoryLogic({ product_id, quantity, idempotencyKey });
+            
+            const response = {
+                 ...result,
+                 status: result.success ? 200 : (result.message === 'Product not found' ? 404 : 409)
+            };
+
+            // Send response to temporary reply queue using the default exchange (empty string)
+            if (replyTo) {
+                channel.sendToQueue(
+                    replyTo,
+                    Buffer.from(JSON.stringify(response)),
+                    { correlationId: correlationId }
+                );
             }
+
+            // Acknowledge the request
+            channel.ack(msg);
+
+        } catch (error) {
+            console.error("Error processing RabbitMQ message:", error);
+             channel.ack(msg);
         }
     });
 };
