@@ -1,4 +1,23 @@
 {
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "users": [
+    {
+      "name": "appuser",
+      "password": "apppass",
+      "tags": "administrator"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "appuser",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
   "queues": [
     {
       "name": "inventory_queue",
