@@ -1,0 +1,19 @@
+@base_url=http://localhost:3000
+
+### Get products
+GET {{base_url}}/api/products
+Accept: application/json
+
+### Get orders
+GET {{base_url}}/api/orders
+Accept: application/json
+
+### Create order
+POST {{base_url}}/api/orders
+Content-Type: application/json
+
+{
+    "product_id": 1,
+    "quantity": 1,
+    "user_id": 201
+}
