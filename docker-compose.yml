@@ -18,7 +18,7 @@ services:
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
-      timeout: 5s
+      timeout: 5s   
       retries: 12
 
   order-service:
