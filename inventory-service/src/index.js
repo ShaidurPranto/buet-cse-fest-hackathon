@@ -18,7 +18,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.log('Starting Inventory Service...');
 
     await bootstrapDatabase();
-    await connectRabbitMQ();
+    // await connectRabbitMQ();
 
     app.listen(PORT, () => {
       console.log(`Inventory Service running on port ${PORT}`);
