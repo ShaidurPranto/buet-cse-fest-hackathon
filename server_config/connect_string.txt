@@ -1,0 +1,1 @@
+ssh -i "./server_config/ops_craft_secret_key_pair_mumbai.pem" ubuntu@ec2-65-1-114-231.ap-south-1.compute.amazonaws.com

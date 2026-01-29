@@ -1,6 +1,7 @@
-// Consolidated API Service for future integration
-export const INVENTORY_API_URL = 'http://localhost:3001/api';
-export const ORDER_API_URL = 'http://localhost:3000/api';
+// Using relative paths for production deployment via Nginx reverse proxy
+// specific prefixes allow Nginx to route to correct microservice
+export const INVENTORY_API_URL = '/service/inventory';
+export const ORDER_API_URL = '/service/order';
 
 // Product API
 export const fetchProducts = async () => {

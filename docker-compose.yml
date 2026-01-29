@@ -46,6 +46,14 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "8080:80"
+    networks:
+      - app-network
+
 volumes:
   rabbitmq_data:
 
