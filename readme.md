@@ -1,6 +1,4 @@
-# Railway Ticketing Microservices System
 
-A microservices-based railway ticketing system built with Node.js, Express, and PostgreSQL. The system is designed to be deployed on Kubernetes and uses Docker for containerization.
 
 ## Architecture
 
