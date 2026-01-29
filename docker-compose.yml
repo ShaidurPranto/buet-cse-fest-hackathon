@@ -58,5 +58,4 @@ volumes:
 networks:
   app-network:
     name: hackathon-net
-    # driver: bridge
-    external: true  
+    driver: bridge
