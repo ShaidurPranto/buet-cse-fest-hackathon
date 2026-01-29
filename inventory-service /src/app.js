@@ -1,9 +1,9 @@
 import express from 'express';
-import scheduleRoutes from './routes/scheduleRoutes.js';
+import inventoryRoutes from './routes/inventoryRoutes.js';
 
 const app = express();
 
 app.use(express.json());
-app.use('/api', scheduleRoutes);
+app.use('/api', inventoryRoutes);
 
 export default app;

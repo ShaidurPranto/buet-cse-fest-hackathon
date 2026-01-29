@@ -14,12 +14,12 @@ process.on('unhandledRejection', (reason, promise) => {
 
 (async () => {
   try {
-    console.log('Starting Train Catalog Service...');
+    console.log('Starting Inventory Service...');
 
     await bootstrapDatabase();
 
     app.listen(PORT, () => {
-      console.log(`Train Catalog Service running on port ${PORT}`);
+      console.log(`Inventory Service running on port ${PORT}`);
     });
   } catch (err) {
     console.error('Startup failed:', err);
