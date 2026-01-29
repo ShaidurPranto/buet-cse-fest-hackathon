@@ -1,6 +1,8 @@
 import pool from '../config/db.js';
 // import { publishOrder } from '../config/rabbitmq.js';
 
+let orderRequestCount = 0;
+
 export const getOrders = async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM "order"');
@@ -22,6 +24,7 @@ export const getProducts = async (req, res) => {
 };
 
 export const createOrder = async (req, res) => {
+    orderRequestCount++;
     const { product_id, quantity, user_id } = req.body;
 
     // basic validation
@@ -36,9 +39,9 @@ export const createOrder = async (req, res) => {
 
         // foreign key constraint will handle non-existent product_id
         const insertQuery = `
-            INSERT INTO "order" (product_id, quantity, user_id)
-            VALUES ($1, $2, $3)
-            RETURNING id, product_id, quantity, user_id
+            INSERT INTO "order" (product_id, quantity, user_id, order_status)
+            VALUES ($1, $2, $3, 'PENDING')
+            RETURNING id, product_id, quantity, user_id, order_status
         `;
         const result = await client.query(insertQuery, [product_id, quantity, user_id]);
         const newOrder = result.rows[0];
@@ -48,52 +51,85 @@ export const createOrder = async (req, res) => {
         console.log(`Order ${newOrder.id} created successfully.`);
 
         // syncing http communication with inventory service
-        try {
-            // using AbortController for timeout
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout as per spec 
+        let inventorySuccess = false;
+        let inventoryMessage = '';
+        let lastError = null;
 
-            const inventoryResponse = await fetch('http://inventory-service:3001/api/inventory', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    product_id: newOrder.product_id,
-                    quantity: newOrder.quantity
-                }),
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
+        for (let i = 0; i < 3; i++) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
-            if (!inventoryResponse.ok) {
-                const errorData = await inventoryResponse.json();
-                console.error(`Inventory update failed for Order ${newOrder.id}:`, errorData);
-                 return res.status(inventoryResponse.status).json({ 
-                    order: newOrder, 
-                    inventory_status: 'FAILED', 
-                    error: errorData.error || 'Inventory Update Failed' 
+                console.log(`Attempting inventory update for Order ${newOrder.id} (Attempt ${i + 1})`);
+                
+                const inventoryResponse = await fetch('http://inventory-service:3001/api/inventory', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': newOrder.id.toString()
+                    },
+                    body: JSON.stringify({
+                        product_id: newOrder.product_id,
+                        quantity: newOrder.quantity
+                    }),
+                    signal: controller.signal
                 });
-            }
+                clearTimeout(timeoutId);
 
-            const inventoryData = await inventoryResponse.json();
+                if (inventoryResponse.ok) {
+                    const inventoryData = await inventoryResponse.json();
+                    inventorySuccess = true;
+                    inventoryMessage = inventoryData.message;
+                    break;
+                } else {
+                    let errorMsg = 'Inventory Error';
+                    try {
+                        const errorData = await inventoryResponse.json();
+                        errorMsg = errorData.error || errorMsg;
+                    } catch (e) { /* ignore JSON parse error */ }
+
+                    // Don't retry on client errors
+                    if ([400, 404, 409].includes(inventoryResponse.status)) {
+                        throw new Error(errorMsg || 'Inventory Client Error');
+                    }
+                    console.warn(`Inventory update failed (Attempt ${i + 1}): ${inventoryResponse.status}`);
+                    lastError = new Error(errorMsg);
+                }
+            } catch (error) {
+                console.error(`Error communicating with Inventory Service (Attempt ${i + 1}):`, error.message);
+                lastError = error;
+                if (error.message.includes('Inventory Client Error') || error.message.includes('Product not found') || error.message.includes('Insufficient stock')) {
+                    break;
+                }
+            }
+            
+            // Backoff before retry
+            if (!inventorySuccess && i < 2) {
+                await new Promise(res => setTimeout(res, 1000));
+            }
+        }
+
+        if (inventorySuccess) {
+             // Update Order Status to DONE
+             await pool.query('UPDATE "order" SET order_status = $1 WHERE id = $2', ['DONE', newOrder.id]);
+             newOrder.order_status = 'DONE'; 
+
+             // CHAOS: Random 500 noise after success (every 11th request)
+             if (orderRequestCount % 11 === 0) {
+                 console.log("CHAOS INJECTION: Order processed successfully, but returning 500 noise.");
+                 return res.status(500).json({ error: "Simulated Internal Server Error (Noise)" });
+             }
+
              res.status(201).json({ 
                 order: newOrder, 
                 inventory_status: 'SUCCESS',
-                message: inventoryData.message 
+                message: inventoryMessage 
             });
-
-        } catch (error) {
-            console.error("Error communicating with Inventory Service:", error);
-            if (error.name === 'AbortError') {
-                 return res.status(503).json({ 
-                    order: newOrder, 
-                    inventory_status: 'TIMEOUT', 
-                    error: 'Inventory Service did not respond in time' 
-                });
-            }
+        } else {
              return res.status(503).json({ 
                 order: newOrder, 
-                inventory_status: 'ERROR', 
-                error: 'Could not contact Inventory Service' 
+                inventory_status: 'FAILED', 
+                error: lastError ? lastError.message : 'Inventory Service Unreachable'
             });
         }
 

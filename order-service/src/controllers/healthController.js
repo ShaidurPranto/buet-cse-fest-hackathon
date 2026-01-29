@@ -40,9 +40,8 @@ export const getHealth = async (req, res) => {
         } catch (invError) {
             console.error('Inventory Service Health Check Failed:', invError);
             healthStatus.services.inventory_service = 'DOWN';
-            healthStatus.status = 'DOWN'; // Mark overall status as DOWN if dependency is missing? 
-                                          // Usually debatable, but safer for "ready" probes.
-        }
+            healthStatus.status = 'DOWN'; // Mark overall status as DOWN if dependency is missing
+         }
 
         if (healthStatus.status === 'UP') {
             res.status(200).json(healthStatus);

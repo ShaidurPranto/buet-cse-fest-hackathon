@@ -1,219 +1,203 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Server, Database, AlertCircle, CheckCircle, ShieldCheck, RefreshCw, Users } from 'lucide-react';
-
-const WINDOW_SIZE_MS = 30000; // 30 seconds rolling window
-const ALERT_THRESHOLD = 1.0;  // 1 second threshold
-
-// Helper to calculate P95 latency
-const calculateP95 = (reqs) => {
-    if (reqs.length === 0) return 0;
-    const sorted = [...reqs].sort((a, b) => a.duration - b.duration);
-    const index = Math.ceil(0.95 * sorted.length) - 1;
-    return sorted[index].duration;
-};
+import { Activity, Server, CheckCircle, XCircle, FileJson, Hash } from 'lucide-react';
 
 const SystemMonitor = () => {
-    // State for request history (timestamps, durations, status, type)
-    const [requests, setRequests] = useState([]);
+    const [activeTab, setActiveTab] = useState('services');
+    const [orderHealth, setOrderHealth] = useState(null);
+    const [inventoryHealth, setInventoryHealth] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [lastUpdated, setLastUpdated] = useState(new Date());
 
-    // State for the "Downstream DB" health simulation
-    const [isDbUp, setIsDbUp] = useState(true);
-    const [lastHealthCheck, setLastHealthCheck] = useState(new Date());
+    const fetchHealth = async () => {
+        try {
+            // Fetch Order Service Health
+            try {
+                const res = await fetch('http://localhost:3000/health');
+                const data = await res.json();
+                setOrderHealth({ 
+                    httpStatus: res.status, 
+                    isUp: res.ok, 
+                    data 
+                });
+            } catch (err) {
+                setOrderHealth({ 
+                    httpStatus: 0, 
+                    isUp: false, 
+                    data: { error: 'Service Unreachable' } 
+                });
+            }
 
-    // Effect: The "Clock" - cleans up old data every second to ensure the window rolls
+            // Fetch Inventory Service Health
+            try {
+                const res = await fetch('http://localhost:3001/health');
+                const data = await res.json();
+                setInventoryHealth({ 
+                    httpStatus: res.status, 
+                    isUp: res.ok, 
+                    data 
+                });
+            } catch (err) {
+                setInventoryHealth({ 
+                    httpStatus: 0, 
+                    isUp: false, 
+                    data: { error: 'Service Unreachable' } 
+                });
+            }
+
+            setLastUpdated(new Date());
+        } catch (error) {
+            console.error("Monitoring Error", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const interval = setInterval(() => {
-            const now = Date.now();
-            setRequests(prevRequests =>
-                prevRequests.filter(req => (now - req.timestamp) < WINDOW_SIZE_MS)
-            );
-            setLastHealthCheck(new Date());
-        }, 1000);
-
+        fetchHealth();
+        const interval = setInterval(fetchHealth, 3000); // Poll every 3s
         return () => clearInterval(interval);
     }, []);
 
-    // Helper: Simulate a request coming in
-    const simulateRequest = (durationSec, type = 'normal') => {
-        let status = 'success';
-        let resilienceOutcome = 'none'; // 'recovered', 'blocked_duplicate', 'uncertain'
+    const ServiceCard = ({ title, health, port }) => {
+        if (!health) return <div className="card">Loading...</div>;
 
-        // Logic for Schrödinger's Simulation
-        if (!isDbUp) {
-            status = 'error';
-        } else if (type === 'gremlin') {
-            status = 'timeout'; // Simulating timeout > 2s
-        } else if (type === 'crash_commit') {
-            // Only if simulated "Crash after Commit"
-            status = 'success'; // User sees success eventually
-            resilienceOutcome = 'recovered'; // But backend had to recover it
-        } else if (type === 'duplicate') {
-            status = 'success';
-            resilienceOutcome = 'blocked_duplicate';
-        }
+        const isUp = health.isUp;
+        // Extract dependency statuses if available
+        const services = health.data?.services || {};
 
-        const newReq = {
-            id: Date.now() + Math.random(),
-            timestamp: Date.now(),
-            duration: durationSec,
-            status: status,
-            resilienceOutcome: resilienceOutcome
-        };
-        setRequests(prev => [...prev, newReq]);
-    };
-
-    // --- METRICS CALCULATION ---
-
-    // 1. Latency & Performance (Rolling 30s)
-    const avgResponseTime = requests.length > 0
-        ? requests.reduce((acc, curr) => acc + curr.duration, 0) / requests.length
-        : 0;
-    const p95Latency = calculateP95(requests);
-    const rps = (requests.length / 30).toFixed(1); // Avg RPS over 30s window
-    const isCritical = avgResponseTime > ALERT_THRESHOLD;
-
-    // 2. Reliability & Counters
-    const metrics = requests.reduce((acc, req) => {
-        acc[req.status] = (acc[req.status] || 0) + 1;
-        if (req.resilienceOutcome === 'recovered') acc.recovered++;
-        if (req.resilienceOutcome === 'blocked_duplicate') acc.blocked++;
-        return acc;
-    }, { success: 0, timeout: 0, error: 0, recovered: 0, blocked: 0 });
-
-    // 3. UX Metric
-    const totalReqs = requests.length || 1;
-    const userSuccessRate = ((metrics.success / totalReqs) * 100).toFixed(1);
-
-    return (
-        <div className="dashboard-container">
-
-            {/* LAYER 2: VISUAL ALERT (CRITICAL REQUIREMENT) */}
-            <div className={`alert-box ${isCritical ? 'status-red' : 'status-green'}`}>
-                {isCritical ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-                        <AlertCircle size={32} /> CRITICAL: LATENCY {avgResponseTime.toFixed(2)}s
+        return (
+            <div className="card" style={{ borderLeft: `4px solid ${isUp ? '#22c55e' : '#ef4444'}` }}>
+                <div className="card-header">
+                    <h3><Server size={20} /> {title}</h3>
+                    <div className={`badge ${isUp ? 'badge-success' : 'badge-error'}`}>
+                        {isUp ? 'ONLINE' : 'OFFLINE'}
                     </div>
-                ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-                        <CheckCircle size={32} /> SYSTEM OPERATION NORMAL
+                </div>
+                
+                <div className="metrics-row" style={{ marginTop: '1rem' }}>
+                    <div className="metric-block">
+                        <div className="label">Endpoint</div>
+                        <div className="value" style={{ fontSize: '0.9rem' }}>localhost:{port}</div>
+                    </div>
+                    <div className="metric-block">
+                        <div className="label">HTTP Status</div>
+                        <div className="value">{health.httpStatus || 'ERR'}</div>
+                    </div>
+                </div>
+
+                {/* Dependencies List */}
+                {Object.keys(services).length > 0 && (
+                    <div style={{ marginTop: '1rem', padding: '10px', background: '#f8fafc', borderRadius: '6px' }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '5px', color: '#64748b' }}>DEPENDENCIES</div>
+                        {Object.entries(services).map(([key, status]) => (
+                            <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', marginBottom: '4px' }}>
+                                <span style={{ textTransform: 'capitalize' }}>{key.replace('_', ' ')}</span>
+                                <span style={{ color: status === 'UP' ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                                    {status}
+                                </span>
+                            </div>
+                        ))}
                     </div>
                 )}
             </div>
+        );
+    };
 
-            <div className="grid">
-                {/* LAYER 2: PERFORMANCE METRICS */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3><Activity size={20} /> Performance (30s Window)</h3>
-                    </div>
-                    <div className="metrics-row">
-                        <MetricBlock label="Avg Latency" value={`${avgResponseTime.toFixed(2)}s`} color={isCritical ? '#ef4444' : '#22c55e'} />
-                        <MetricBlock label="P95 Latency" value={`${p95Latency.toFixed(2)}s`} />
-                        <MetricBlock label="RPS" value={rps} />
-                    </div>
+    return (
+        <div className="dashboard-container">
+            <div className="header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div>
+                    <h2>System Monitor</h2>
+                    <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
+                        Live health check of microservices • Last updated: {lastUpdated.toLocaleTimeString()}
+                    </p>
                 </div>
-
-                {/* LAYER 3: RELIABILITY & SCHRÖDINGER METRICS */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3><ShieldCheck size={20} /> Resilience (Schrödinger)</h3>
-                    </div>
-                    <div className="resilience-grid">
-                        <div className="res-item">
-                            <span>Uncertain/Recovered</span>
-                            <span className="badge badge-warning">{metrics.recovered}</span>
-                        </div>
-                        <div className="res-item">
-                            <span>Duplicates Blocked</span>
-                            <span className="badge badge-success">{metrics.blocked}</span>
-                        </div>
-                        <div className="res-item">
-                            <span>Timeouts Handled</span>
-                            <span className="badge badge-error">{metrics.timeout}</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* LAYER 4: USER EXPERIENCE */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3><Users size={20} /> User Experience</h3>
-                    </div>
-                    <div className="ux-score">
-                        <div className="score-value" style={{ color: userSuccessRate > 95 ? '#16a34a' : '#ca8a04' }}>
-                            {userSuccessRate}%
-                        </div>
-                        <div className="sub-text">Success Rate</div>
-                    </div>
-                    <div className="mini-feed">
-                        <div>✅ {metrics.success} Successful</div>
-                        <div>❌ {metrics.error} Server Errors</div>
-                    </div>
-                </div>
-
-                {/* LAYER 1: SERVICE HEALTH */}
-                <div className="card">
-                    <div className="card-header-small">
-                        <h3>Deep Health Check</h3>
-                        <span style={{ fontSize: '0.7rem' }}>Last: {lastHealthCheck.toLocaleTimeString()}</span>
-                    </div>
-
-                    <HealthItem name="Order Service" isUp={true} />
-                    <HealthItem name="Inventory Service" isUp={isDbUp} />
-                    <HealthItem name="Inv. DB (Downstream)" isUp={isDbUp} />
-                </div>
-            </div>
-
-            {/* SIMULATION CONTROLS */}
-            <div className="controls">
-                <h3>Chaos Engineering Controls</h3>
-                <p style={{ color: '#64748b', marginBottom: '1rem' }}>Inject failures to verify durability</p>
-
-                <div className="button-group">
-                    {/* Normal Traffic */}
-                    <button className="btn btn-norm" onClick={() => simulateRequest(0.2)}>
-                        Normal Traffic
+                
+                {/* Tab Switcher */}
+                <div className="tabs" style={{ display: 'flex', gap: '10px', background: '#fff', padding: '5px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <button 
+                        onClick={() => setActiveTab('services')}
+                        style={{ 
+                            padding: '8px 16px', 
+                            borderRadius: '6px',
+                            border: 'none',
+                            background: activeTab === 'services' ? '#0f172a' : 'transparent',
+                            color: activeTab === 'services' ? '#fff' : '#64748b',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}
+                    >
+                        <Activity size={16} /> Services
                     </button>
-
-                    {/* Latency Spike */}
-                    <button className="btn btn-slow" onClick={() => simulateRequest(5.0, 'gremlin')}>
-                        Inject Gremlin (Latency)
-                    </button>
-
-                    {/* Crash After Commit Scenario */}
-                    <button className="btn" style={{ backgroundColor: '#8b5cf6' }} onClick={() => simulateRequest(0.8, 'crash_commit')}>
-                        Simulate "Crash After Commit"
-                    </button>
-
-                    {/* Duplicate Message Scenario */}
-                    <button className="btn" style={{ backgroundColor: '#0ea5e9' }} onClick={() => simulateRequest(0.1, 'duplicate')}>
-                        Simulate Duplicate Msg
-                    </button>
-
-                    {/* Infrastructure Failure */}
-                    <button className="btn btn-fail" onClick={() => setIsDbUp(!isDbUp)}>
-                        {isDbUp ? 'Kill Database' : 'Restore Database'}
+                    <button 
+                        onClick={() => setActiveTab('health_api')}
+                        style={{ 
+                            padding: '8px 16px', 
+                            borderRadius: '6px',
+                            border: 'none',
+                            background: activeTab === 'health_api' ? '#0f172a' : 'transparent',
+                            color: activeTab === 'health_api' ? '#fff' : '#64748b',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}
+                    >
+                        <FileJson size={16} /> Health API
                     </button>
                 </div>
             </div>
+
+            {activeTab === 'services' ? (
+                <div className="grid">
+                    <ServiceCard title="Order Service" health={orderHealth} port={3000} />
+                    <ServiceCard title="Inventory Service" health={inventoryHealth} port={3001} />
+                </div>
+            ) : (
+                <div className="grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                    <div className="card">
+                        <div className="card-header">
+                            <h3><Hash size={20} /> GET /health (Order Service)</h3>
+                            <span className="badge" style={{ background: '#f1f5f9', color: '#475569' }}>:3000</span>
+                        </div>
+                        <pre style={{ 
+                            background: '#0f172a', 
+                            color: '#10b981', 
+                            padding: '15px', 
+                            borderRadius: '8px', 
+                            fontSize: '0.85rem',
+                            overflow: 'auto',
+                            marginTop: '10px'
+                        }}>
+                            {orderHealth?.data ? JSON.stringify(orderHealth.data, null, 2) : 'Loading...'}
+                        </pre>
+                    </div>
+
+                    <div className="card">
+                        <div className="card-header">
+                            <h3><Hash size={20} /> GET /health (Inventory Service)</h3>
+                            <span className="badge" style={{ background: '#f1f5f9', color: '#475569' }}>:3001</span>
+                        </div>
+                        <pre style={{ 
+                            background: '#0f172a', 
+                            color: '#10b981', 
+                            padding: '15px', 
+                            borderRadius: '8px', 
+                            fontSize: '0.85rem',
+                            overflow: 'auto', 
+                            marginTop: '10px'
+                        }}>
+                            {inventoryHealth?.data ? JSON.stringify(inventoryHealth.data, null, 2) : 'Loading...'}
+                        </pre>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
-
-const MetricBlock = ({ label, value, color }) => (
-    <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: color || 'inherit' }}>{value}</div>
-        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{label}</div>
-    </div>
-);
-
-const HealthItem = ({ name, isUp }) => (
-    <div className="health-item">
-        <span>{name}</span>
-        <span className={`badge ${isUp ? 'badge-up' : 'badge-down'}`}>
-            {isUp ? "UP" : "DOWN"}
-        </span>
-    </div>
-);
 
 export default SystemMonitor;

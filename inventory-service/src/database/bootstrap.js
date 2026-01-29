@@ -49,6 +49,18 @@ async function createDatabase() {
   await runSqlFile(filePath);
 }
 
+async function addIdempotency() {
+    console.log('Checking for idempotency table...');
+    const exists = await tableExists('processed_orders');
+    if (!exists) {
+        console.log('Adding processed_orders table...');
+        const filePath = path.join(__dirname, '../../database/migrations/002_add_idempotency.sql');
+        await runSqlFile(filePath);
+    } else {
+        console.log('processed_orders table already exists.');
+    }
+}
+
 async function populateDatabase() {
   const filePath = path.join(__dirname, '../../database/seeds/seed_data.sql');
   console.log('Populating database with initial data...');
@@ -62,13 +74,15 @@ async function bootstrapDatabase() {
   const exists = await tableExists('inventory');
 
   if (exists) {
-    console.log('Database already initialized. Skipping bootstrap.');
+    console.log('Database already initialized. Checking for updates...');
+    await addIdempotency();
     return;
   }
 
   console.log('First-time setup detected.');
   await createDatabase();
   await populateDatabase();
+  await addIdempotency();
   console.log('Database setup complete.');
 }
 
