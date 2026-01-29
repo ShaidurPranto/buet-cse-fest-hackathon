@@ -12,11 +12,21 @@ const OrderForm = () => {
     const [showModal, setShowModal] = useState(false);
     const [modalData, setModalData] = useState(null);
     const [isError, setIsError] = useState(false);
+    const [currentIdempotencyKey, setCurrentIdempotencyKey] = useState(null);
 
     // Load products on component mount
     useEffect(() => {
         loadProducts();
     }, []);
+
+    // Generate idempotency key only when order intent changes (new selection)
+    useEffect(() => {
+        if (selectedProduct && quantity && userId) {
+            const newKey = `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            setCurrentIdempotencyKey(newKey);
+            // console.log("New Idempotency Key generated:", newKey);
+        }
+    }, [selectedProduct, quantity, userId]);
 
     const loadProducts = async () => {
         setLoadingProducts(true);
@@ -48,8 +58,9 @@ const OrderForm = () => {
         setShowModal(false);
 
         try {
-            const idempotencyKey = `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            const response = await createOrder(selectedProduct, parseInt(quantity, 10), parseInt(userId, 10), idempotencyKey);
+            // Use existing key. If it fails and user retries without changing inputs, 
+            // the key remains same, preventing ghost PENDING orders via idempotency.
+            const response = await createOrder(selectedProduct, parseInt(quantity, 10), parseInt(userId, 10), currentIdempotencyKey);
 
             if (response.status >= 200 && response.status < 300) {
                 setModalData({
@@ -66,6 +77,8 @@ const OrderForm = () => {
                     message: response.data.message || 'Your order has been placed successfully!'
                 });
                 setIsError(false);
+                // On success, we reset form which triggers new key via useEffect
+                setQuantity(1);
             } else {
                 setModalData({
                     title: '✗ Order Failed',
@@ -79,9 +92,9 @@ const OrderForm = () => {
                     message: response.data.error || 'Failed to place order.'
                 });
                 setIsError(true);
+                // Do NOT reset form or key on failure, allowing retry
             }
             setShowModal(true);
-            setQuantity(1);
 
         } catch (error) {
             setModalData({

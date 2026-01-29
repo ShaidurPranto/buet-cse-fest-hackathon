@@ -172,6 +172,10 @@ export const createOrder = async (req, res) => {
                 message: inventoryMessage
             });
         } else {
+            // Update order to FAILED to prevent "ghost" pending orders
+            await pool.query('UPDATE "order" SET order_status = $1 WHERE id = $2', ['FAILED', newOrder.id]);
+            newOrder.order_status = 'FAILED';
+            
             addResponseTime(Date.now() - startTime);
             return res.status(503).json({
                 order: newOrder,
