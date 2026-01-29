@@ -1,0 +1,26 @@
+name: Initialize Database
+
+on:
+  workflow_dispatch:   # manual trigger
+
+jobs:
+  init-db:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get install postgresql-client -y
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          psql "$DATABASE_URL" -f database/migrations/001_create_tables.sql
+
+      - name: Seed data
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          psql "$DATABASE_URL" -f database/seeds/seed_data.sql
