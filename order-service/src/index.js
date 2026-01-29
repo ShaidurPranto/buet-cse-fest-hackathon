@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import app from './app.js';
 import { bootstrapDatabase } from './database/bootstrap.js';
+import { connectRabbitMQ } from './config/rabbitmq.js';
 
 const PORT = process.env.PORT || 3000;
 
@@ -17,6 +18,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.log('Starting Order Service...');
 
     await bootstrapDatabase();
+    await connectRabbitMQ();
 
     app.listen(PORT, () => {
       console.log(`Order Service running on port ${PORT}`);
