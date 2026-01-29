@@ -25,6 +25,13 @@
       "durable": true,
       "auto_delete": false,
       "arguments": {}
+    },
+    {
+      "name": "order_response_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
     }
   ],
   "exchanges": [
@@ -36,6 +43,15 @@
       "auto_delete": false,
       "internal": false,
       "arguments": {}
+    },
+    {
+        "name": "inventory_exchange",
+        "vhost": "/",
+        "type": "direct",
+        "durable": true,
+        "auto_delete": false,
+        "internal": false,
+        "arguments": {}
     }
   ],
   "bindings": [
@@ -46,6 +62,14 @@
       "destination_type": "queue",
       "routing_key": "order.created",
       "arguments": {}
+    },
+    {
+        "source": "inventory_exchange",
+        "vhost": "/",
+        "destination": "order_response_queue",
+        "destination_type": "queue",
+        "routing_key": "inventory.response",
+        "arguments": {}
     }
   ]
 }
